@@ -24,6 +24,7 @@ use craft\base\Plugin;
 use craft\events\ElementEvent;
 use craft\events\RegisterCacheOptionsEvent;
 use craft\services\Elements;
+use craft\services\Sites;
 use craft\helpers\StringHelper;
 use craft\helpers\ElementHelper;
 use craft\behaviors\EnvAttributeParserBehavior;
@@ -101,6 +102,11 @@ class CloudFrontPurge extends Plugin
       Elements::EVENT_AFTER_SAVE_ELEMENT,
       function (ElementEvent $event) {
         $element = $event->element;
+        $uri = $element->uri;
+
+        $sites = new Sites();
+        $primarySite = $sites->getPrimarySite();
+
         switch (true) {
           case $element instanceof \craft\elements\Entry:
             if (
@@ -111,7 +117,22 @@ class CloudFrontPurge extends Plugin
             ) {
               $uri = $element->uri;
               if ($uri === "__home__") $uri = "";
-              $path = '/' . $this->_cfPrefix() . ltrim($uri, '/') . $this->_cfSuffix();
+
+              if ($element->siteId && $element->siteId != '1') {
+                $site = $sites->getSiteById($element->siteId);
+                $siteUri = $site->baseUrl;
+
+                // if site URI contains the primary site domain, just get the path and prepend to URI in Cloudfront, otherwise get full URI
+                if (strpos($siteUri, $primarySite->baseUrl) !== false) {
+                    $siteUriPath = str_replace($primarySite->baseUrl, '', $siteUri);
+                    $path = '/' . $this->_cfPrefix() . ltrim($siteUriPath, '/') . ltrim($uri, '/') . $this->_cfSuffix();
+                } else {
+                    $path = $siteUri . ltrim($uri, '/');
+                }
+              } else {
+                $path = '/' . $this->_cfPrefix() . ltrim($uri, '/') . $this->_cfSuffix();
+              }
+
               Craft::info("Invalidating Entry path:" . $path);
               $this->invalidateCdnPath($path);
             }
